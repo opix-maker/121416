@@ -1,0 +1,60 @@
+name: Build Recent Data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 */8 * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: snapshot-push
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository (shallow)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build Recent Data
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+          BGM_USER_AGENT: ${{ secrets.BGM_USER_AGENT }}
+          BUILD_TYPE: 'recent'
+        run: node build_data.js
+
+      - name: Clean up archive cache
+        run: rm -rf .archive_cache
+
+      - name: Snapshot commit and force push
+        run: |
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+
+          if [[ -z $(git status -s recent_data.json) ]]; then
+            echo "✅ No changes detected. Skipping push."
+            exit 0
+          fi
+
+          echo "✅ Changes detected. Creating snapshot..."
+          git checkout --orphan _snapshot
+          git add -A
+          git commit -m "snapshot: auto-update recent_data.json $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          git push -f origin _snapshot:main
+          echo "✅ Snapshot pushed successfully."
